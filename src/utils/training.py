@@ -138,13 +138,14 @@ def train_loop(
     test_loader: Optional[NumpyLoader] = None,
     wandb_kwargs: Optional[Mapping] = None,
     plot_fn: Optional[Callable] = None,
-    plot_freq : int = 10,
+    plot_freq: int = 10,
+    wandb_user: str = 'metodj'
 ) -> TrainState:
     """Runs the training loop!
     """
     wandb_kwargs = {
         'project': 'anytime-poe',
-        'entity': 'jamesallingham',
+        'entity': wandb_user,
         'notes': '',
         # 'mode': 'disabled',
         'config': config.to_dict()
