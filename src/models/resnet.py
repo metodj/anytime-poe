@@ -9,6 +9,7 @@ from flax.linen import initializers
 Array = jnp.ndarray
 ModuleDef = Any
 
+
 class ResBlock(nn.Module):
     hidden_size: int
     dense: ModuleDef
