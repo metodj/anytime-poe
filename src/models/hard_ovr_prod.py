@@ -80,7 +80,7 @@ class Hard_OvR_Ens(nn.Module):
             loss = nll
         else:
             def nll_fn(y, logits):
-                return  -1 * distrax.Categorical(logits).log_prob(y)
+                return -1. * distrax.Categorical(logits).log_prob(y)
 
             nlls = jax.vmap(nll_fn, in_axes=(None, 0))(y, ens_logits)
 
