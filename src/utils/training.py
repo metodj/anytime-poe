@@ -168,18 +168,18 @@ def train_loop(
             loss_fn = make_loss_fn(model, x_batch, y_batch, train=True, aggregation='mean', **kwargs)
             grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
 
-            (nll, (model_state, err)), grads = grad_fn(
+            (nll, (model_state, err, prod_ll, members_ll)), grads = grad_fn(
                 state.params, state.model_state, rng,
             )
 
-            return state.apply_gradients(grads=grads, model_state=model_state), nll * len(x_batch), err * len(x_batch)
+            return state.apply_gradients(grads=grads, model_state=model_state), nll * len(x_batch), err * len(x_batch), prod_ll * len(x_batch), members_ll * len(x_batch)
 
         @jax.jit
         def eval_step(state, x_batch, y_batch, rng):
             kwargs = {'β': state.β} if state.β is not None else {}
             eval_fn = make_eval_fn(model, x_batch, y_batch, train=False, aggregation='sum', **kwargs)
 
-            nll, (_, err) = eval_fn(
+            nll, (_, err, _, _) = eval_fn(
                 state.params, state.model_state, rng,
             )
 
@@ -188,6 +188,8 @@ def train_loop(
 
         train_losses = []
         train_errs = []
+        train_prod_ll = []
+        train_members_ll = []
         val_losses = []
         val_errs = []
         best_val_loss = jnp.inf
@@ -197,14 +199,21 @@ def train_loop(
         for epoch in epochs:
             batch_losses = []
             batch_errs = []
+            batch_prod_lls = []
+            batch_members_lls = []
             for (x_batch, y_batch) in train_loader:
                 rng, batch_rng = random.split(rng)
-                state, nll, err = train_step(state, x_batch, y_batch, batch_rng)
+                state, nll, err, prod_ll, members_ll = train_step(state, x_batch, y_batch, batch_rng)
                 batch_losses.append(nll)
                 batch_errs.append(err)
+                batch_prod_lls.append(prod_ll)
+                batch_members_lls.append(members_ll)
 
-            train_losses.append(jnp.sum(jnp.array(batch_losses)) / len(train_loader.dataset))
-            train_errs.append(jnp.sum(jnp.array(batch_errs)) / len(train_loader.dataset))
+            N = len(train_loader.dataset)
+            train_losses.append(jnp.sum(jnp.array(batch_losses)) / N)
+            train_errs.append(jnp.sum(jnp.array(batch_errs)) / N)
+            train_prod_ll.append(jnp.sum(jnp.array(batch_prod_lls)) / N)
+            train_members_ll.append(jnp.sum(jnp.array(batch_members_lls)) / N)
 
             batch_losses = []
             batch_errs = []
@@ -221,7 +230,9 @@ def train_loop(
             metrics_str = (f'train loss: {train_losses[-1]:7.5f}, val loss: {val_losses[-1]:7.5f}' +
                            f', train err: {train_errs[-1]:6.4f}, val err: {val_errs[-1]:6.4f}' +
                            (f', β: {state.β:.4f}' if state.β is not None else '') +
-                           f', lr: {learning_rate:7.5f}')
+                           f', lr: {learning_rate:7.5f}' +
+                           f', prod_nll: {train_prod_ll[-1]:7.5f}',
+                           f', members_nll: {train_members_ll[-1]:7.5f}')
             epochs.set_postfix_str(metrics_str)
             print(f'epoch: {epoch:3} - {metrics_str}')
 
@@ -233,6 +244,9 @@ def train_loop(
                 'val/err': val_errs[-1],
                 'β': state.β,
                 'learning_rate': learning_rate,
+                'train/prod_nll': train_prod_ll[-1],
+                'train/members_nll': train_members_ll[-1],
+                'train/nll_ratio': train_members_ll[-1] / train_prod_ll[-1]
             }
 
             if (epoch % plot_freq == 0) and plot_fn is not None:

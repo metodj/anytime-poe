@@ -74,6 +74,8 @@ class Hard_OvR_Ens(nn.Module):
         pred = prod_preds.argmax(axis=0)
         err = y != pred
 
+        nlls = 0.
+
         if per_member_loss is None:
             loss = nll
         else:
@@ -84,7 +86,7 @@ class Hard_OvR_Ens(nn.Module):
 
             loss = (1-per_member_loss)*nll + per_member_loss*jnp.sum(nlls, axis=0)
 
-        return loss, err
+        return loss, err, nll, nlls
 
     def pred(
         self,
@@ -128,20 +130,20 @@ def make_Hard_OvR_Ens_loss(
     def batch_loss(params, state, rng):
         # define loss func for 1 example
         def loss_fn(params, x, y):
-            (loss, err), new_state = model.apply(
+            (loss, err, prod_ll, members_ll), new_state = model.apply(
                 {"params": params, **state}, x, y, train=train, β=β, per_member_loss=per_member_loss,
                 mutable=list(state.keys()) if train else {},
                 rngs={'dropout': rng},
             )
 
-            return loss, new_state, err
+            return loss, new_state, err, prod_ll, members_ll
 
         # broadcast over batch and aggregate
         agg = get_agg_fn(aggregation)
-        loss_for_batch, new_state, err_for_batch = jax.vmap(
-            loss_fn, out_axes=(0, None, 0), in_axes=(None, 0, 0), axis_name="batch"
+        loss_for_batch, new_state, err_for_batch, prod_ll_for_batch, members_ll_for_batch = jax.vmap(
+            loss_fn, out_axes=(0, None, 0, 0, 0), in_axes=(None, 0, 0), axis_name="batch"
         )(params, x_batch, y_batch)
-        return agg(loss_for_batch, axis=0), (new_state, agg(err_for_batch, axis=0))
+        return agg(loss_for_batch, axis=0), (new_state, agg(err_for_batch, axis=0), agg(prod_ll_for_batch, axis=0), agg(members_ll_for_batch, axis=0))
 
     return batch_loss
 
