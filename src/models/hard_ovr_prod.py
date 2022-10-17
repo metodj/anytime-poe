@@ -1,6 +1,7 @@
 from typing import Any, Callable, Mapping, Optional
 from functools import partial
 from attr import mutable
+from enum import Enum
 
 import numpy as np
 import jax
@@ -16,6 +17,11 @@ from src.models.resnet import ResNet
 
 
 KwArgs = Mapping[str, Any]
+
+
+class MembersLL(Enum):
+    soft_ovr = "soft_ovr"
+    softmax = "softmax"
 
 
 def hardened_ovr_ll(y_1hot, logits, T):
@@ -35,6 +41,7 @@ class Hard_OvR_Ens(nn.Module):
     weights_init: Callable = initializers.ones
     logscale_init: Callable = initializers.zeros
     learn_weights: bool = False
+    members_ll_type: str = "softmax"
 
     def setup(self):
         self.nets = [ResNet(**self.net) for _ in range(self.size)]
@@ -44,6 +51,7 @@ class Hard_OvR_Ens(nn.Module):
             (self.size,)
         )
         self.weights = weights if self.learn_weights else jax.lax.stop_gradient(weights)
+        self.members_ll = MembersLL[self.members_ll_type]
 
     def __call__(
         self,
@@ -75,16 +83,19 @@ class Hard_OvR_Ens(nn.Module):
         err = y != pred
 
         nlls = 0.
-
         if per_member_loss is None:
             loss = nll
         else:
-            def nll_fn(y, logits):
-                return -1. * distrax.Categorical(logits).log_prob(y)
+            if self.members_ll == MembersLL.softmax:
+                def nll_fn(y, logits):
+                    return -1. * distrax.Categorical(logits).log_prob(y)
 
-            nlls = jax.vmap(nll_fn, in_axes=(None, 0))(y, ens_logits)
-
-            loss = (1-per_member_loss)*nll + per_member_loss*jnp.sum(nlls, axis=0)
+                nlls = jnp.sum(jax.vmap(nll_fn, in_axes=(None, 0))(y, ens_logits), axis=0)
+            elif self.members_ll == MembersLL.soft_ovr:
+                nlls = -1. * prod_ll
+            else:
+                raise ValueError
+            loss = (1-per_member_loss)*nll + per_member_loss*nlls
 
         return loss, err, nll, nlls
 
