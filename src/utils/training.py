@@ -139,7 +139,8 @@ def train_loop(
     wandb_kwargs: Optional[Mapping] = None,
     plot_fn: Optional[Callable] = None,
     plot_freq: int = 10,
-    wandb_user: str = 'metodj'
+    wandb_user: str = 'metodj',
+    best_val_error: bool = True
 ) -> TrainState:
     """Runs the training loop!
     """
@@ -261,29 +262,32 @@ def train_loop(
             run.log(metrics)
 
             rng, test_rng = random.split(rng)
-            if val_errs[-1] <= best_val_err:
-                if config.get('β_schedule', False) and state.β <= 0.9 * config.β_schedule.end:
-                    continue
+            # if val_errs[-1] <= best_val_err:
+            #     if config.get('β_schedule', False) and state.β <= 0.9 * config.β_schedule.end:
+            #         continue
 
-                best_val_err = val_errs[-1]
-                print("Best val_err")
-                # TODO: add model saving.
-                best_state = state
+            best_val_err = val_errs[-1]
+            print("Best val_err")
+            # TODO: add model saving.
+            best_state = state
 
-                run.summary['best_epoch'] = epoch
-                run.summary['best_val_err'] = val_errs[-1]
+            run.summary['best_epoch'] = epoch
+            run.summary['best_val_err'] = val_errs[-1]
 
-                if test_loader is not None:
-                    batch_losses = []
-                    batch_errs = []
-                    for (x_batch, y_batch) in (test_loader):
-                        eval_rng, test_rng = random.split(test_rng)
-                        nll, err = eval_step(state, x_batch, y_batch, eval_rng)
-                        batch_losses.append(nll)
+            if test_loader is not None:
+                batch_losses = []
+                batch_errs = []
+                for (x_batch, y_batch) in (test_loader):
+                    eval_rng, test_rng = random.split(test_rng)
+                    nll, err = eval_step(state, x_batch, y_batch, eval_rng)
+                    batch_losses.append(nll)
 
-                    test_loss = jnp.sum(jnp.array(batch_losses)) / len(test_loader.dataset)
-                    test_err = jnp.sum(jnp.array(batch_errs)) / len(test_loader.dataset)
-                    run.summary['test/loss'] = test_loss
-                    run.summary['test/err'] = test_err
+                test_loss = jnp.sum(jnp.array(batch_losses)) / len(test_loader.dataset)
+                test_err = jnp.sum(jnp.array(batch_errs)) / len(test_loader.dataset)
+                run.summary['test/loss'] = test_loss
+                run.summary['test/err'] = test_err
+
+        if best_state is None:
+            best_state = state
 
     return state, best_state
