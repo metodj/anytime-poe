@@ -1,4 +1,5 @@
 from typing import Callable
+from enum import Enum
 
 import jax
 import jax.numpy as jnp
@@ -10,6 +11,14 @@ NOISE_TYPES = [
     'per-ens-homo',
     'hetero',
 ]
+
+
+class MembersLL(Enum):
+    soft_ovr = "soft_ovr"
+    softmax = "softmax"
+    GND = "GND"
+    gaussian = "gaussian"
+
 
 def raise_if_not_in_list(val, valid_options, varname):
     if val not in valid_options:

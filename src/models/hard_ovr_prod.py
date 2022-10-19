@@ -1,7 +1,6 @@
 from typing import Any, Callable, Mapping, Optional
 from functools import partial
 from attr import mutable
-from enum import Enum
 
 import numpy as np
 import jax
@@ -12,16 +11,11 @@ from chex import Array, assert_rank, assert_equal_shape
 import distrax
 import matplotlib.pyplot as plt
 
-from src.models.common import get_agg_fn
+from src.models.common import get_agg_fn, MembersLL
 from src.models.resnet import ResNet
 
 
 KwArgs = Mapping[str, Any]
-
-
-class MembersLL(Enum):
-    soft_ovr = "soft_ovr"
-    softmax = "softmax"
 
 
 def hardened_ovr_ll(y_1hot, logits, T):
