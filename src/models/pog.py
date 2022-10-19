@@ -9,7 +9,7 @@ from chex import Array
 import distrax
 import matplotlib.pyplot as plt
 
-from src.models.common import raise_if_not_in_list, NOISE_TYPES, get_locs_scales_probs, get_agg_fn
+from src.models.common import raise_if_not_in_list, NOISE_TYPES, get_locs_scales_probs, get_agg_fn, MembersLL
 from src.models.resnet import ResNet
 from src.models.pon import normal_prod
 
@@ -30,6 +30,7 @@ class PoG_Ens(nn.Module):
     logscale_init: Callable = initializers.zeros
     noise: str = 'homo'
     learn_weights: bool = False
+    members_ll_type: str = "softmax"
 
     def setup(self):
         raise_if_not_in_list(self.noise, NOISE_TYPES, 'self.noise')
@@ -47,6 +48,7 @@ class PoG_Ens(nn.Module):
                 self.logscale_init,
                 (self.net['out_size'],) if self.noise == 'homo' else (self.size, self.net['out_size'],)
             )
+        self.members_ll = MembersLL[self.members_ll_type]
 
     def __call__(
         self,
@@ -54,7 +56,7 @@ class PoG_Ens(nn.Module):
         y: int,
         train: bool = False,
         β: int = 2,
-        per_member_loss: bool = False,
+        per_member_loss: bool = True,
     ) -> Array:
         locs, scales, probs = get_locs_scales_probs(self, x, train)
 
@@ -73,17 +75,25 @@ class PoG_Ens(nn.Module):
         loc, _ = calculate_pog_loc_scale(locs, scales)
         err = jnp.mean((loc - y)**2)
 
+        nlls = 0.
+
         if not per_member_loss:
             loss = nll
         else:
-            def nll_fn(y, loc, scale):
-                return  -1 * distrax.Normal(loc, scale).log_prob(y)
 
-            nlls = jax.vmap(nll_fn, in_axes=(None, 0, 0))(y, locs, scales)
+            if self.members_ll == MembersLL.gaussian:
+                def nll_fn(y, loc, scale):
+                    return  -1 * distrax.Normal(loc, scale).log_prob(y)
+                nlls = jnp.sum(jax.vmap(nll_fn, in_axes=(None, 0, 0))(y, locs, scales), axis=0)[0]
+            elif self.members_ll == MembersLL.GND:
+                nlls = -1. * log_prob
+            else:
+                raise ValueError
 
-            loss = 0.50*nll + 0.50*jnp.sum(nlls, axis=0)[0]
+            loss = 0.50*nll + 0.50*nlls
+            # loss = nlls
 
-        return loss, err
+        return loss, err, nll, nlls
 
     def pred(
         self,
@@ -126,26 +136,26 @@ def make_PoG_Ens_loss(
     # ^ controls how much our GND looks like a Guassian (β=2) or Uniform (β->inf)
     # should be taken from 2 to ??? duringn the process of training
     train: bool = True,
-    per_member_loss: bool = False,
+    per_member_loss: bool = True,
     aggregation: str = 'mean',
 ) -> Callable:
     """Creates a loss function for training a PoE DUN."""
     def batch_loss(params, state, rng):
         # define loss func for 1 example
         def loss_fn(params, x, y):
-            (loss, err), new_state = model.apply(
+            (loss, err, prod_nll, members_nll), new_state = model.apply(
                 {"params": params, **state}, x, y, train=train, β=β, per_member_loss=per_member_loss,
                 mutable=list(state.keys()) if train else {},
             )
 
-            return loss, new_state, err
+            return loss, new_state, err, prod_nll, members_nll
 
         # broadcast over batch and aggregate
         agg = get_agg_fn(aggregation)
-        loss_for_batch, new_state, err_for_batch = jax.vmap(
-            loss_fn, out_axes=(0, None, 0), in_axes=(None, 0, 0), axis_name="batch"
+        loss_for_batch, new_state, err_for_batch, prod_nll_for_batch, members_nll_for_batch = jax.vmap(
+            loss_fn, out_axes=(0, None, 0, 0, 0), in_axes=(None, 0, 0), axis_name="batch"
         )(params, x_batch, y_batch)
-        return agg(loss_for_batch, axis=0), (new_state, agg(err_for_batch, axis=0))
+        return agg(loss_for_batch, axis=0), (new_state, agg(err_for_batch, axis=0), agg(prod_nll_for_batch, axis=0), agg(members_nll_for_batch, axis=0))
 
     return batch_loss
 

@@ -56,7 +56,7 @@ class PoN_Ens(nn.Module):
 
         err = jnp.mean((loc - y)**2)
 
-        return nll, err
+        return nll, err, nll, nll
 
     def pred(
         self,
@@ -85,19 +85,19 @@ def make_PoN_Ens_loss(
     def batch_loss(params, state, rng):
         # define loss func for 1 example
         def loss_fn(params, x, y):
-            (nll, err), new_state = model.apply(
+            (nll, err, prod_ll, members_ll), new_state = model.apply(
                 {"params": params, **state}, x, y, train=train,
                 mutable=list(state.keys()) if train else {},
             )
 
-            return nll, new_state, err
+            return nll, new_state, err, prod_ll, members_ll
 
         # broadcast over batch and aggregate
         agg = get_agg_fn(aggregation)
-        loss_for_batch, new_state, err_for_batch = jax.vmap(
-            loss_fn, out_axes=(0, None, 0), in_axes=(None, 0, 0), axis_name="batch"
+        loss_for_batch, new_state, err_for_batch, prod_ll_for_batch, members_ll_for_batch = jax.vmap(
+            loss_fn, out_axes=(0, None, 0, 0, 0), in_axes=(None, 0, 0), axis_name="batch"
         )(params, x_batch, y_batch)
-        return agg(loss_for_batch, axis=0), (new_state, agg(err_for_batch, axis=0))
+        return agg(loss_for_batch, axis=0), (new_state, agg(err_for_batch, axis=0), agg(prod_ll_for_batch, axis=0), agg(members_ll_for_batch, axis=0))
 
     return batch_loss
 
