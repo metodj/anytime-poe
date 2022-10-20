@@ -1,4 +1,4 @@
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Optional
 from functools import partial
 
 import jax
@@ -18,6 +18,7 @@ KwArgs = Mapping[str, Any]
 
 
 def gnd_ll(y, loc, scale, β):
+    # scale = jnp.sqrt(2) * scale
     per_dim_lls = jnp.log(β) - jnp.log(2*scale) - jax.scipy.special.gammaln(1/β) - (jnp.abs(y - loc)/scale)**β
     return jnp.sum(per_dim_lls, axis=0, keepdims=True)
 
@@ -56,13 +57,15 @@ class PoG_Ens(nn.Module):
         y: int,
         train: bool = False,
         β: int = 2,
-        per_member_loss: bool = True,
+        per_member_loss: Optional[float] = None,
     ) -> Array:
         locs, scales, probs = get_locs_scales_probs(self, x, train)
 
         def product_logprob(y):
             prod_lls = jax.vmap(gnd_ll, in_axes=(None, 0, 0, None))(y, locs, scales, β)
-            return jnp.sum(probs * prod_lls)
+            # TODO: this "tempering" was part of the reason for worse performance of base learners in regression case
+            # return jnp.sum(probs * prod_lls)
+            return jnp.sum(prod_lls)
 
         dy = 0.001
         ys = jnp.arange(-10, 10 + dy, dy)
@@ -90,8 +93,7 @@ class PoG_Ens(nn.Module):
             else:
                 raise ValueError
 
-            loss = 0.50*nll + 0.50*nlls
-            # loss = nlls
+            loss = (1 - per_member_loss)*nll + per_member_loss*nlls
 
         return loss, err, nll, nlls
 
@@ -136,7 +138,7 @@ def make_PoG_Ens_loss(
     # ^ controls how much our GND looks like a Guassian (β=2) or Uniform (β->inf)
     # should be taken from 2 to ??? duringn the process of training
     train: bool = True,
-    per_member_loss: bool = True,
+    per_member_loss: Optional[float] = None,
     aggregation: str = 'mean',
 ) -> Callable:
     """Creates a loss function for training a PoE DUN."""
