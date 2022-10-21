@@ -88,6 +88,10 @@ def ovr_err(logits, y):
     return y != probs.argmax(axis=0)
 
 
+def max_voting(logits, y):
+    return nn.sigmoid(logits).round().sum(axis=0).argmax() != y
+
+
 def pairwise_ce(logits):
     M = logits.shape[0]
     assert_rank(logits, 2)
