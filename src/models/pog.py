@@ -78,8 +78,6 @@ class PoG_Ens(nn.Module):
         loc, _ = calculate_pog_loc_scale(locs, scales)
         err = jnp.mean((loc - y)**2)
 
-        nlls = 0.
-
         if not per_member_loss:
             loss = nll
         else:
@@ -88,14 +86,13 @@ class PoG_Ens(nn.Module):
                 def nll_fn(y, loc, scale):
                     return  -1 * distrax.Normal(loc, scale).log_prob(y)
                 nlls = jnp.sum(jax.vmap(nll_fn, in_axes=(None, 0, 0))(y, locs, scales), axis=0)[0]
+                loss = (1 - per_member_loss)*nll + per_member_loss*nlls
             elif self.members_ll == MembersLL.GND:
-                nlls = -1. * log_prob
+                loss = -1. * log_prob + (1 - per_member_loss) * jnp.log(Z + 1e-36)
             else:
                 raise ValueError
 
-            loss = (1 - per_member_loss)*nll + per_member_loss*nlls
-
-        return loss, err, nll, nlls
+        return loss, err, jnp.log(Z + 1e-36), log_prob
 
     def pred(
         self,

@@ -85,13 +85,15 @@ class Hard_OvR_Ens(nn.Module):
                     return -1. * distrax.Categorical(logits).log_prob(y)
 
                 nlls = jnp.sum(jax.vmap(nll_fn, in_axes=(None, 0))(y, ens_logits), axis=0)
+                loss = (1-per_member_loss)*nll + per_member_loss*nlls
             elif self.members_ll == MembersLL.soft_ovr:
                 nlls = -1. * prod_ll
+                loss = -1. * prod_ll + (1-per_member_loss) * jnp.log(Z + 1e-36)
             else:
                 raise ValueError
-            loss = (1-per_member_loss)*nll + per_member_loss*nlls
 
-        return loss, err, nll, nlls
+
+        return loss, err, jnp.log(Z + 1e-36), prod_ll
 
     def pred(
         self,
