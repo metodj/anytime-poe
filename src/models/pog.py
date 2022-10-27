@@ -92,7 +92,7 @@ class PoG_Ens(nn.Module):
             else:
                 raise ValueError
 
-        return loss, err, jnp.log(Z + 1e-36), log_prob
+        return loss, err, jnp.log(Z + 1e-36), -1. * log_prob
 
     def pred(
         self,
