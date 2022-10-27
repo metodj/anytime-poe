@@ -21,11 +21,13 @@ def get_config() -> config_dict.ConfigDict:
     config.optim.momentum = 0.9
     config.learning_rate = 1e-4
 
-    config.model_name = 'Reg_Ens'
+    config.model_name = 'PoN_Ens'
     config.model = config_dict.ConfigDict()
     config.model.size = 5
     config.model.learn_weights = False
     config.model.noise = 'homo'
+    config.model.alpha = 1.
+    config.model.exact_poe = True
 
     config.model.net = config_dict.ConfigDict()
     config.model.net.depth = 2

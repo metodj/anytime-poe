@@ -39,7 +39,7 @@ def get_locs_scales_probs(
         locs = ens_preds[:, :, 0]  # (M, O)
         log_scales = ens_preds[:, :, 1]  # (M, O)
         scales = jnp.exp(log_scales)
-    elif obj.noise == 'homo-per-ens':
+    elif obj.noise == 'per-ens-homo':
         locs = ens_preds
         scales = jnp.exp(obj.logscale)  # (M, O)
     else:

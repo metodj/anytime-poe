@@ -16,6 +16,11 @@ from src.models.resnet import ResNet
 KwArgs = Mapping[str, Any]
 
 
+def nd_ll(y, loc, scale):
+    per_dim_lls = distrax.Normal(loc, scale).log_prob(y)
+    return jnp.sum(per_dim_lls, axis=0, keepdims=True)
+
+
 class PoN_Ens(nn.Module):
     """Ens trained as a Product of Normals."""
     size: int
@@ -24,6 +29,8 @@ class PoN_Ens(nn.Module):
     logscale_init: Callable = initializers.zeros
     noise: str = 'homo'
     learn_weights: bool = False
+    alpha: float = 1.0
+    exact_poe: bool = True
 
     def setup(self):
         raise_if_not_in_list(self.noise, NOISE_TYPES, 'self.noise')
@@ -52,9 +59,20 @@ class PoN_Ens(nn.Module):
 
         loc, scale = normal_prod(locs, scales, probs)
 
-        nll = -distrax.Normal(loc, scale).log_prob(y)[0]
-
         err = jnp.mean((loc - y)**2)
+
+        if self.exact_poe:
+            nll = -distrax.Normal(loc, scale).log_prob(y)[0]
+        else:
+            def product_logprob(y):
+                prod_lls = jax.vmap(nd_ll, in_axes=(None, 0, 0))(y, locs, scales)
+                return jnp.sum(prod_lls)
+            dy = 0.001
+            ys = jnp.arange(-10, 10 + dy, dy)
+            ps = jnp.exp(jax.vmap(product_logprob)(ys))
+            Z = jnp.trapz(ps, ys)
+            log_prob = product_logprob(y)
+            nll = -(log_prob - self.alpha * jnp.log(Z + 1e-36))
 
         return nll, err, nll, nll
 
@@ -145,7 +163,6 @@ def make_PoN_Ens_plots(
     axs[0].scatter(X_train, y_train, c='C0')
     for i in range(size):
         axs[0].plot(xs, locs[i], c='k', alpha=0.25)
-
 
     axs[0].plot(xs, loc, c='C1')
     axs[0].fill_between(xs, loc - scale, loc + scale, color='C1', alpha=0.4)
