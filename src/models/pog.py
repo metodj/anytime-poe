@@ -1,4 +1,4 @@
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional, List
 from functools import partial
 
 import jax
@@ -9,7 +9,8 @@ from chex import Array
 import distrax
 import matplotlib.pyplot as plt
 
-from src.models.common import raise_if_not_in_list, NOISE_TYPES, get_locs_scales_probs, get_agg_fn, MembersLL
+from src.models.common import raise_if_not_in_list, NOISE_TYPES, get_locs_scales_probs, get_agg_fn, MembersLL, powerset, \
+    PRNGKey
 from src.models.resnet import ResNet
 from src.models.pon import normal_prod
 
@@ -58,8 +59,9 @@ class PoG_Ens(nn.Module):
         train: bool = False,
         β: int = 2,
         per_member_loss: Optional[float] = None,
+        ensemble_ids: List[int] = (0, 1, 2, 3, 4,)
     ) -> Array:
-        locs, scales, probs = get_locs_scales_probs(self, x, train)
+        locs, scales, probs = get_locs_scales_probs(self, x, train, ensemble_ids)
 
         def product_logprob(y):
             prod_lls = jax.vmap(gnd_ll, in_axes=(None, 0, 0, None))(y, locs, scales, β)
@@ -137,13 +139,14 @@ def make_PoG_Ens_loss(
     train: bool = True,
     per_member_loss: Optional[float] = None,
     aggregation: str = 'mean',
+    ensemble_ids: List[int] = (0, 1, 2, 3, 4,)
 ) -> Callable:
     """Creates a loss function for training a PoE DUN."""
     def batch_loss(params, state, rng):
         # define loss func for 1 example
         def loss_fn(params, x, y):
             (loss, err, prod_nll, members_nll), new_state = model.apply(
-                {"params": params, **state}, x, y, train=train, β=β, per_member_loss=per_member_loss,
+                {"params": params, **state}, x, y, train=train, β=β, per_member_loss=per_member_loss, ensemble_ids=ensemble_ids,
                 mutable=list(state.keys()) if train else {},
             )
 

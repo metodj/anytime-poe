@@ -1,4 +1,4 @@
-from typing import Callable, Mapping, Optional, Tuple, Union
+from typing import Callable, Mapping, Optional, Tuple, Union, List
 from functools import partial
 
 import wandb
@@ -19,9 +19,8 @@ from clu import parameter_overview
 from src.data import NumpyLoader
 import src.models as models
 import src.utils.optim
+from src.models.common import PRNGKey, powerset
 
-
-PRNGKey = jnp.ndarray
 ScalarOrSchedule = Union[float, optax.Schedule]
 
 
@@ -126,6 +125,16 @@ def setup_training(
     return model, state
 
 
+def get_ensemble_ids(stochastic_sampling_ens: bool, batch_rng: PRNGKey, sub_ensembles: List[List[int]], M: int) -> List[int]:
+    if stochastic_sampling_ens:
+        n = len(sub_ensembles)
+        probs = jnp.ones(n) / n
+        ids_ = distrax.Categorical(probs=probs).sample(seed=batch_rng)
+        return sub_ensembles[ids_]
+    else:
+        return [i for i in range(M)]
+
+
 def train_loop(
     model: nn.Module,
     state: TrainState,
@@ -140,7 +149,8 @@ def train_loop(
     plot_fn: Optional[Callable] = None,
     plot_freq: int = 10,
     wandb_user: str = 'metodj',
-    best_val_error: bool = True
+    best_val_error: bool = True,
+    stochastic_sampling_ens: bool = False
 ) -> TrainState:
     """Runs the training loop!
     """
@@ -155,7 +165,7 @@ def train_loop(
 
     with wandb.init(**wandb_kwargs) as run:
         @jax.jit
-        def train_step(state, x_batch, y_batch, rng):
+        def train_step(state, x_batch, y_batch, rng, ensemble_ids):
             kwargs = {'β': state.β} if state.β is not None else {}
 
             if config.get('train_data_noise', False):
@@ -166,7 +176,7 @@ def train_loop(
                 x_batch = x_batch + x_noise
                 y_batch = y_batch + y_noise
 
-            loss_fn = make_loss_fn(model, x_batch, y_batch, train=True, aggregation='mean', **kwargs)
+            loss_fn = make_loss_fn(model, x_batch, y_batch, train=True, aggregation='mean', ensemble_ids=ensemble_ids, **kwargs)
             grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
 
             (nll, (model_state, err, prod_ll, members_ll)), grads = grad_fn(
@@ -186,6 +196,7 @@ def train_loop(
 
             return nll, err
 
+        sub_ensembles = powerset(config.model.size)
 
         train_losses = []
         train_errs = []
@@ -202,9 +213,10 @@ def train_loop(
             batch_errs = []
             batch_prod_lls = []
             batch_members_lls = []
-            for (x_batch, y_batch) in train_loader:
+            for i, (x_batch, y_batch) in enumerate(train_loader):
                 rng, batch_rng = random.split(rng)
-                state, nll, err, prod_ll, members_ll = train_step(state, x_batch, y_batch, batch_rng)
+                ensemble_ids = get_ensemble_ids(stochastic_sampling_ens, batch_rng, sub_ensembles, config.model.size)
+                state, nll, err, prod_ll, members_ll = train_step(state, x_batch, y_batch, batch_rng, ensemble_ids)
                 batch_losses.append(nll)
                 batch_errs.append(err)
                 batch_prod_lls.append(prod_ll)
