@@ -1,4 +1,4 @@
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, List
 from functools import partial
 
 import jax
@@ -18,13 +18,9 @@ KwArgs = Mapping[str, Any]
 
 
 def pon_gmm_ll(y, loc, scale, K):
-    # TODO: get MixtureSameFamily to work with batches
     per_dim_lls = MixtureSameFamily(mixture_distribution=distrax.Categorical(probs=jnp.ones(int(K)) / K),
                                     components_distribution=distrax.Normal(loc=loc, scale=scale)).log_prob(y)
-    print("BANANA")
-    print(per_dim_lls.shape)
-    print(per_dim_lls)
-    return jnp.sum(per_dim_lls, axis=0, keepdims=True)
+    return per_dim_lls
 
 
 class PoN_Ens_GMM(nn.Module):
@@ -63,41 +59,34 @@ class PoN_Ens_GMM(nn.Module):
         train: bool = False,
     ) -> Array:
         locs, scales, probs = get_locs_scales_probs_pon_gmm(self, x, train)
-        print(y)
-        print(x.shape)
-        print(locs.shape)
-        print(scales.shape)
-        print(probs.shape)
 
         def product_logprob(y):
             prod_lls = jax.vmap(pon_gmm_ll, in_axes=(None, 0, 0, None))(y, locs, scales, self.K)
             return jnp.sum(prod_lls)
         dy = 0.001
         ys = jnp.arange(-10, 10 + dy, dy)
-        ps = jnp.exp(jax.vmap(product_logprob)(ys))
-        print(ps)
+        ps = jnp.exp(jax.vmap(product_logprob, in_axes=(0,))(ys))
+
         Z = jnp.trapz(ps, ys)
+
         log_prob = product_logprob(y)
         nll = -(log_prob - self.alpha * jnp.log(Z + 1e-36))
 
-        y_pred = (ps * ys) / Z
+        y_pred = jnp.trapz(ps * ys, ys) / Z
         err = jnp.mean((y_pred - y)**2)
-
-        print(nll)
-        print(err)
 
         return nll, err, nll, nll
 
     def pred(
         self,
         x: Array,
-        train: bool = False,
-        return_ens_preds = False,
+        train: bool=False,
+        return_ens_preds=False,
     ) -> Array:
-        # TODO: adjust
-        locs, scales, probs = get_locs_scales_probs(self, x, train)
+        locs, scales, probs = get_locs_scales_probs_pon_gmm(self, x, train)
 
-        loc, scale = normal_prod(locs, scales, probs)
+        # loc, scale = normal_prod_gmm(locs, scales, probs)
+        loc, scale = monte_carlo_pred(locs, scales, probs)
 
         if return_ens_preds:
             return (loc, scale), (locs, scales)
@@ -130,6 +119,7 @@ def make_PoN_Ens_GMM_loss(
     y_batch: Array,
     train: bool = True,
     aggregation: str = 'mean',
+    ensemble_ids: List[int] = (0, 1, 2, 3, 4,)
 ) -> Callable:
     """Creates a loss function for training a PoE Ens."""
     def batch_loss(params, state, rng):
@@ -152,7 +142,25 @@ def make_PoN_Ens_GMM_loss(
     return batch_loss
 
 
-def normal_prod(locs, scales, probs):
+def monte_carlo_pred(locs, scales, probs):
+    def product_logprob(y):
+        prod_lls = jax.vmap(pon_gmm_ll, in_axes=(None, 0, 0, None))(y, locs, scales, int(locs.shape[1]))
+        return jnp.sum(prod_lls)
+    dy = 0.001
+    ys = jnp.arange(-10, 10 + dy, dy)
+    ps = jnp.exp(jax.vmap(product_logprob, in_axes=(0,))(ys))
+
+    Z = jnp.trapz(ps, ys)
+
+    y_pred = jnp.trapz(ps * ys, ys) / Z
+
+    scale_pred = jnp.trapz(ps * (ys - y_pred)**2, ys) / Z
+
+    return y_pred, scale_pred
+
+
+def normal_prod_gmm(locs, scales, probs):
+    locs = locs.sum(axis=1, keepdims=True)
     scales2 = scales ** 2
     θ_1 = ((locs / scales2) * probs).sum(axis=0)
     θ_2 = ((-1 / (2 * scales2)) * probs).sum(axis=0)
@@ -187,29 +195,38 @@ def make_PoN_Ens_GMM_plots(
 
     size = locs.shape[0]
 
+    if len(loc.shape) == 1:
+        loc = jnp.expand_dims(loc, axis=1)
+    if len(scale.shape) == 1:
+        scale = jnp.expand_dims(scale, axis=1)
+
     loc = loc[:, 0]
     scale = scale[:, 0]
-    locs = locs[:, :, 0]
+    locs_0 = locs[:, :, 0]
+    locs_1 = locs[:, :, 1]
     scales = scales[:, :, 0]
 
     axs[0].scatter(X_train, y_train, c='C0')
     for i in range(size):
-        axs[0].plot(xs, locs[i], c='k', alpha=0.25)
+        axs[0].plot(xs, locs_0[i], c='k', alpha=0.25)
+        axs[0].plot(xs, locs_1[i], c='k', alpha=0.25)
 
     axs[0].plot(xs, loc, c='C1')
     axs[0].fill_between(xs, loc - scale, loc + scale, color='C1', alpha=0.4)
 
-    axs[0].set_title(f"PoN Ens - train loss: {pon_tloss:.6f}, val loss: {pon_vloss:.6f}")
+    axs[0].set_title(f"PoN-GMM Ens - train loss: {pon_tloss:.6f}, val loss: {pon_vloss:.6f}")
     axs[0].set_ylim(-2.5, 2.5)
     axs[0].set_xlim(-3, 3)
 
-
     # plot locs and scales for each member
     axs[1].scatter(X_train, y_train, c='C0')
+    color_dict = {0: "green", 1: "blue", 2: "red", 3: "orange", 4: "purple"}
     for i in range(size):
-        axs[1].plot(xs, locs[i], alpha=0.5)
-        axs[1].fill_between(xs, locs[i] - scales[i], locs[i] + scales[i], alpha=0.1)
-    axs[1].set_title(f"PoN Members")
+        axs[1].plot(xs, locs_0[i], alpha=0.5, color=color_dict[i])
+        axs[1].plot(xs, locs_1[i], alpha=0.5, linestyle="--", color=color_dict[i])
+        # axs[1].fill_between(xs, locs_0[i] - scales[i], locs_0[i] + scales[i], alpha=0.1, color=color_dict[i])
+        # axs[1].fill_between(xs, locs_1[i] - scales[i], locs_1[i] + scales[i], alpha=0.1, color=color_dict[i])
+    axs[1].set_title(f"PoN-GMM Members")
     axs[1].set_ylim(-2.5, 2.5)
     axs[1].set_xlim(-3, 3)
 
