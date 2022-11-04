@@ -52,7 +52,7 @@ class PoN_Ens(nn.Module):
     def __call__(
         self,
         x: Array,
-        y: int,
+        y: float,
         train: bool = False,
     ) -> Array:
         locs, scales, probs = get_locs_scales_probs(self, x, train)
