@@ -29,7 +29,7 @@ class PoN_Ens(nn.Module):
     logscale_init: Callable = initializers.zeros
     noise: str = 'homo'
     learn_weights: bool = False
-    alpha: float = 1.0
+    alpha_static: float = 1.0
     exact_poe: bool = True
 
     def setup(self):
@@ -54,15 +54,20 @@ class PoN_Ens(nn.Module):
         x: Array,
         y: float,
         train: bool = False,
+        alpha: float = 0.,
     ) -> Array:
         locs, scales, probs = get_locs_scales_probs(self, x, train)
 
-        loc, scale = normal_prod(locs, scales, probs)
+        loc_prod, scale_prod = normal_prod(locs, scales, probs)
 
-        err = jnp.mean((loc - y)**2)
+        err = jnp.mean((loc_prod - y)**2)
 
         if self.exact_poe:
-            nll = -distrax.Normal(loc, scale).log_prob(y)[0]
+            def nll(y, loc, scale):
+                return  -1 * distrax.Normal(loc, scale).log_prob(y)
+            nll_de = jax.vmap(nll, in_axes=(None, 0, 0))(y, locs, scales).mean(axis=0)[0]
+            nll_prod = - distrax.Normal(loc_prod, scale_prod).log_prob(y)[0]
+            nll = (1 - alpha) * nll_de + alpha * nll_prod
         else:
             def product_logprob(y):
                 prod_lls = jax.vmap(nd_ll, in_axes=(None, 0, 0))(y, locs, scales)
@@ -72,9 +77,9 @@ class PoN_Ens(nn.Module):
             ps = jnp.exp(jax.vmap(product_logprob)(ys))
             Z = jnp.trapz(ps, ys)
             log_prob = product_logprob(y)
-            nll = -(log_prob - self.alpha * jnp.log(Z + 1e-36))
+            nll = -(log_prob - self.alpha_static * jnp.log(Z + 1e-36))
 
-        return nll, err, nll, nll
+        return nll, err, nll_prod, nll_de
 
     def pred(
         self,
@@ -98,14 +103,15 @@ def make_PoN_Ens_loss(
     y_batch: Array,
     train: bool = True,
     aggregation: str = 'mean',
-    ensemble_ids: List[int] = (0, 1, 2, 3, 4,)
+    ensemble_ids: List[int] = (0, 1, 2, 3, 4,),
+    alpha: float = 0.,
 ) -> Callable:
     """Creates a loss function for training a PoE Ens."""
     def batch_loss(params, state, rng):
         # define loss func for 1 example
         def loss_fn(params, x, y):
             (nll, err, prod_ll, members_ll), new_state = model.apply(
-                {"params": params, **state}, x, y, train=train,
+                {"params": params, **state}, x, y, train=train, alpha=alpha,
                 mutable=list(state.keys()) if train else {},
             )
 

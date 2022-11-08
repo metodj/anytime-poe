@@ -1,4 +1,4 @@
-from typing import Callable, Mapping, Optional, Tuple, Union, List
+from typing import Callable, Mapping, Optional, Tuple, Union, List, Dict
 from functools import partial
 
 import wandb
@@ -29,6 +29,8 @@ class TrainState(train_state.TrainState):
     model_state: FrozenDict
     β: float
     β_val_or_schedule: ScalarOrSchedule = struct.field(pytree_node=False)
+    alpha: float
+    alpha_val_or_schedule: ScalarOrSchedule = struct.field(pytree_node=False)
 
     def apply_gradients(self, *, grads, **kwargs):
         updates, new_opt_state = self.tx.update(
@@ -38,12 +40,13 @@ class TrainState(train_state.TrainState):
             step=self.step + 1,
             params=new_params,
             opt_state=new_opt_state,
-            β=_get_β_for_step(self.step, self.β_val_or_schedule),
+            β=_get_param_for_step(self.step, self.β_val_or_schedule),
+            alpha=_get_param_for_step(self.step, self.alpha_val_or_schedule),
             **kwargs,
         )
 
     @classmethod
-    def create(cls, *, apply_fn, params, tx, β_val_or_schedule, **kwargs):
+    def create(cls, *, apply_fn, params, tx, β_val_or_schedule, alpha_val_or_schedule, **kwargs):
         opt_state = tx.init(params)
         return cls(
             step=0,
@@ -52,7 +55,9 @@ class TrainState(train_state.TrainState):
             tx=tx,
             opt_state=opt_state,
             β_val_or_schedule=β_val_or_schedule,
-            β=_get_β_for_step(0, β_val_or_schedule),
+            β=_get_param_for_step(0, β_val_or_schedule),
+            alpha_val_or_schedule=alpha_val_or_schedule,
+            alpha=_get_param_for_step(0, alpha_val_or_schedule),
             **kwargs,
         )
 
@@ -60,11 +65,11 @@ class TrainState(train_state.TrainState):
 # Helper which helps us deal with the fact that we can either specify a fixed β
 # or a schedule for adjusting β. This is a pattern similar to the one used by
 # optax for dealing with LRs either being specified as a constant or schedule.
-def _get_β_for_step(step, β_val_or_schedule):
-    if callable(β_val_or_schedule):
-        return β_val_or_schedule(step)
+def _get_param_for_step(step, param_val_or_schedule):
+    if callable(param_val_or_schedule):
+        return param_val_or_schedule(step)
     else:
-        return β_val_or_schedule
+        return param_val_or_schedule
 
 
 def setup_training(
@@ -100,19 +105,24 @@ def setup_training(
     optim = optax.inject_hyperparams(optim)
     # This ^ allows us to access the lr as opt_state.hyperparams['learning_rate'].
 
-    # TODO: add sigmoidal schedule which ramps up more quickly and then gives more time for higher βs
-    if config.get('β_schedule', False):
-        add = config.β_schedule.end - config.β_schedule.start
-        if config.β_schedule.name == 'sigmoid':
-            sigmoid = lambda x: 1 / (1 + jnp.exp(x))
-            half_steps = config.β_schedule.steps/2
-            β = lambda step: config.β_schedule.start + add * sigmoid((-step + half_steps)/(config.β_schedule.steps/10))
-        else:  # linear
-            β = lambda step: jnp.minimum(config.β_schedule.start + add / config.β_schedule.steps * step, config.β_schedule.end)
-    elif config.get('β', False):
-        β = config.β
-    else:
-        β = None
+    def _parse_schedule(schedule_name: str, param_name: str) -> Union[None, Callable, float]:
+        # TODO: add sigmoidal schedule which ramps up more quickly and then gives more time for higher βs
+        if config.get(schedule_name, False):
+            add = config[schedule_name].end - config[schedule_name].start
+            if config[schedule_name].name == 'sigmoid':
+                sigmoid = lambda x: 1 / (1 + jnp.exp(x))
+                half_steps = config[schedule_name].steps/2
+                schedule = lambda step: config[schedule_name].start + add * sigmoid((-step + half_steps)/(config[schedule_name].steps/10))
+            else:  # linear
+                schedule = lambda step: jnp.minimum(config[schedule_name].start + add / config[schedule_name].steps * step, config[schedule_name].end)
+        elif config.get(param_name, False):
+            schedule = config.β
+        else:
+            schedule = None
+        return schedule
+
+    β = _parse_schedule('β_schedule', 'β')
+    alpha = _parse_schedule('alpha_schedule', 'alpha')
 
     state = TrainState.create(
         apply_fn=model.apply,
@@ -120,6 +130,7 @@ def setup_training(
         tx=optim(learning_rate=lr, **config.optim.to_dict()),
         model_state=model_state,
         β_val_or_schedule=β,
+        alpha_val_or_schedule=alpha
     )
 
     return model, state
@@ -164,9 +175,15 @@ def train_loop(
     # ^ here wandb_kwargs (i.e. whatever the user specifies) takes priority.
 
     with wandb.init(**wandb_kwargs) as run:
+
+        def _get_kwargs(current_state: TrainState) -> Dict:
+            kwargs = {'β': current_state.β} if current_state.β is not None else {}
+            kwargs_alpha = {'alpha': current_state.alpha} if current_state.alpha is not None else {}
+            return kwargs | kwargs_alpha
+
         @jax.jit
         def train_step(state, x_batch, y_batch, rng, ensemble_ids):
-            kwargs = {'β': state.β} if state.β is not None else {}
+            kwargs = _get_kwargs(state)
 
             if config.get('train_data_noise', False):
                 x_noise_rng, y_noise_rng = random.split(rng)
@@ -187,7 +204,8 @@ def train_loop(
 
         @jax.jit
         def eval_step(state, x_batch, y_batch, rng):
-            kwargs = {'β': state.β} if state.β is not None else {}
+            kwargs = _get_kwargs(state)
+
             eval_fn = make_eval_fn(model, x_batch, y_batch, train=False, aggregation='sum', **kwargs)
 
             nll, (_, err, _, _) = eval_fn(
@@ -256,6 +274,7 @@ def train_loop(
                 'train/err': train_errs[-1],
                 'val/err': val_errs[-1],
                 'β': state.β,
+                'alpha': state.alpha,
                 'learning_rate': learning_rate,
                 'train/prod_nll': train_prod_ll[-1],
                 'train/members_nll': train_members_ll[-1],
