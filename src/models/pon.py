@@ -1,4 +1,4 @@
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, List
 from functools import partial
 
 import jax
@@ -98,6 +98,7 @@ def make_PoN_Ens_loss(
     y_batch: Array,
     train: bool = True,
     aggregation: str = 'mean',
+    ensemble_ids: List[int] = (0, 1, 2, 3, 4,)
 ) -> Callable:
     """Creates a loss function for training a PoE Ens."""
     def batch_loss(params, state, rng):

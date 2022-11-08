@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, List
 
 import jax
 import jax.numpy as jnp
@@ -91,6 +91,7 @@ def make_Reg_Ens_loss(
     y_batch: Array,
     train: bool = True,
     aggregation: str = 'mean',
+    ensemble_ids: List[int] = (0, 1, 2, 3, 4,)
 ) -> Callable:
     """Creates a loss function for training a std Ens."""
     def batch_loss(params, state, rng):
