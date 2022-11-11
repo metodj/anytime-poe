@@ -77,10 +77,13 @@ class Reg_Ens(nn.Module):
             return (loc, scale)
 
 
-def calculate_ens_loc_scale(locs, scales, probs):
+def calculate_ens_loc_scale(locs, scales, probs, epistemic=False):
     loc = (locs * probs).sum(axis=0)
     σ2 = ((locs**2 + scales**2) * probs).sum(axis=0) - loc**2
     scale = jnp.sqrt(σ2)
+    if epistemic:
+        # epistemic = predictive variance - aleatoric
+        return loc, scale, scale - (scales * probs).sum(axis=0)
 
     return loc, scale
 
