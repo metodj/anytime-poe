@@ -1,4 +1,4 @@
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional, List
 from functools import partial
 from attr import mutable
 
@@ -54,6 +54,7 @@ class Hard_OvR_Ens(nn.Module):
         train: bool = False,
         β: int = 1,
         per_member_loss: Optional[float] = None,
+        alpha: float = 0.,
     ) -> Array:
         ens_logits = jnp.stack([net(x, train=train) for net in self.nets], axis=0)  # (Μ, Ο)
         probs = nn.softmax(self.weights, axis=0)  # (M,)
@@ -77,21 +78,18 @@ class Hard_OvR_Ens(nn.Module):
         err = y != pred
 
         nlls = 0.
-        if per_member_loss is None:
-            loss = nll
+        if self.members_ll == MembersLL.softmax:
+            def nll_fn(y, logits):
+                return -1. * distrax.Categorical(logits).log_prob(y)
+
+            nlls = jnp.sum(jax.vmap(nll_fn, in_axes=(None, 0))(y, ens_logits), axis=0)
+            loss = (1-per_member_loss)*nll + per_member_loss*nlls
+        elif self.members_ll == MembersLL.soft_ovr:
+            nlls = -1. * prod_ll
+            # loss = -1. * prod_ll + (1-per_member_loss) * jnp.log(Z + 1e-36)
+            loss = -1. * prod_ll + alpha * jnp.log(Z + 1e-36)
         else:
-            if self.members_ll == MembersLL.softmax:
-                def nll_fn(y, logits):
-                    return -1. * distrax.Categorical(logits).log_prob(y)
-
-                nlls = jnp.sum(jax.vmap(nll_fn, in_axes=(None, 0))(y, ens_logits), axis=0)
-                loss = (1-per_member_loss)*nll + per_member_loss*nlls
-            elif self.members_ll == MembersLL.soft_ovr:
-                nlls = -1. * prod_ll
-                loss = -1. * prod_ll + (1-per_member_loss) * jnp.log(Z + 1e-36)
-            else:
-                raise ValueError
-
+            raise ValueError
 
         return loss, err, jnp.log(Z + 1e-36), prod_ll
 
@@ -132,13 +130,15 @@ def make_Hard_OvR_Ens_loss(
     train: bool = True,
     aggregation: str = 'mean',
     per_member_loss: Optional[float] = None,
+    ensemble_ids: List[int] = (0, 1, 2, 3, 4,),
+    alpha: float = 0.
 ) -> Callable:
     """Creates a loss function for training a Hard One-vs-Rest Ens."""
     def batch_loss(params, state, rng):
         # define loss func for 1 example
         def loss_fn(params, x, y):
             (loss, err, prod_ll, members_ll), new_state = model.apply(
-                {"params": params, **state}, x, y, train=train, β=β, per_member_loss=per_member_loss,
+                {"params": params, **state}, x, y, train=train, β=β, per_member_loss=per_member_loss, alpha=alpha,
                 mutable=list(state.keys()) if train else {},
                 rngs={'dropout': rng},
             )

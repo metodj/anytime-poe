@@ -116,7 +116,12 @@ def setup_training(
             else:  # linear
                 schedule = lambda step: jnp.minimum(config[schedule_name].start + add / config[schedule_name].steps * step, config[schedule_name].end)
         elif config.get(param_name, False):
-            schedule = config.β
+            if param_name == 'β':
+                schedule = config.β
+            elif param_name == 'alpha':
+                schedule = config.alpha
+            else:
+                raise ValueError()
         else:
             schedule = None
         return schedule

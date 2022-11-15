@@ -41,6 +41,13 @@ def get_config() -> config_dict.ConfigDict:
 
     # config.β = 1.
 
+    config.alpha_schedule = config_dict.ConfigDict()
+    config.alpha_schedule.name = 'sigmoid'
+    config.alpha_schedule.start = 0.
+    config.alpha_schedule.end = 1.
+    config.alpha_schedule.steps = config.epochs * num_batches_per_epoch
+    # config.alpha = 1.
+
     config.model.net = config_dict.ConfigDict()
     config.model.net.depth = 5
     config.model.net.hidden_size = 200

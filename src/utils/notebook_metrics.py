@@ -15,6 +15,15 @@ def categorical_probs(logits):
     return probs
 
 
+def categorical_probs_prod(logits, M=5, C=10):
+    assert_rank(logits, 2)
+    assert_shape([logits], (M, C))
+    probs = nn.softmax(logits).prod(axis=0)
+    probs = probs / (probs.sum() + 1e-36)
+    assert_shape([probs], (C,))
+    return probs
+
+
 def categorical_entropy(logits):
     probs = categorical_probs(logits)
     cat = distrax.Categorical(probs=probs)
@@ -40,6 +49,11 @@ def categorical_brier(logits, y):
 
 def categorical_err(logits, y):
     probs = categorical_probs(logits)
+    return y != jnp.argmax(probs, axis=0)
+
+
+def categorical_err_prod(logits, y):
+    probs = categorical_probs_prod(logits)
     return y != jnp.argmax(probs, axis=0)
 
 
