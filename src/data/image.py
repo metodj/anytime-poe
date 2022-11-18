@@ -13,6 +13,7 @@ DATASET_MEAN = {
     'SVHN': (0.4377, 0.4438, 0.4728),
     'CIFAR10': (0.4914, 0.4822, 0.4465),
     'CIFAR100': (0.5071, 0.4866, 0.4409),
+    'EMNIST': (0.1721, ),
 }
 
 
@@ -23,6 +24,7 @@ DATASET_STD = {
     'SVHN': (0.1980, 0.2010, 0.1970),
     'CIFAR10': (0.2470, 0.2435, 0.2616),
     'CIFAR100': (0.2673, 0.2564, 0.2762),
+    'EMNIST': (0.3308, ),
 }
 
 
@@ -52,6 +54,7 @@ def get_image_dataset(
     random_seed: int = 42,
     train_augmentations: list[Callable] = [],
     test_augmentations: list[Callable] = [],
+    normalize: bool = True,
 ) -> Union[Tuple[data.Dataset, data.Dataset], Tuple[data.Dataset, data.Dataset, data.Dataset]]:
     """Provides PyTorch `Dataset`s for the specified image dataset_name.
 
@@ -70,10 +73,12 @@ def get_image_dataset(
 
         test_augmentations: a `list` of augmentations to apply to the test data. (Default: `[]`)
 
+        normalize:
+
     Returns:
         `(train_dataset, test_dataset)` if `val_percent` is 0 otherwise `(train_dataset, test_dataset, val_dataset)`
     """
-    dataset_choices = ['MNIST', 'FashionMNIST', 'KMNIST', 'SVHN', 'CIFAR10', 'CIFAR100']
+    dataset_choices = ['MNIST', 'FashionMNIST', 'KMNIST', 'SVHN', 'CIFAR10', 'CIFAR100', 'EMNIST']
     if dataset_name not in dataset_choices:
         msg = f"Dataset should be one of {dataset_choices} but was {dataset_name} instead."
         raise RuntimeError(msg)
@@ -89,6 +94,10 @@ def get_image_dataset(
     elif dataset_name == 'KMNIST':
         train_kwargs = {"train": True}
         test_kwargs = {"train": False}
+
+    elif dataset_name == 'EMNIST':
+        train_kwargs = {"split": 'letters', "train": True}
+        test_kwargs = {"split": 'letters', "train": False}
 
     elif dataset_name == 'SVHN':
         train_kwargs = {"split": 'train'}
@@ -111,18 +120,21 @@ def get_image_dataset(
     if flatten_img:
         common_transforms += [Flatten()]
 
+    if normalize:
+        normalize_transforms = [transforms.Normalize(DATASET_MEAN[dataset_name], DATASET_STD[dataset_name])]
+    else:
+        normalize_transforms = []
+
     transform_train = transforms.Compose(
         train_augmentations + [
-            transforms.ToTensor(),
-            transforms.Normalize(DATASET_MEAN[dataset_name], DATASET_STD[dataset_name]),
-        ] + common_transforms
+            transforms.ToTensor()
+        ] + normalize_transforms + common_transforms
     )
 
     transform_test = transforms.Compose(
         test_augmentations + [
             transforms.ToTensor(),
-            transforms.Normalize(DATASET_MEAN[dataset_name], DATASET_STD[dataset_name]),
-        ] + common_transforms
+        ] + normalize_transforms + common_transforms
     )
 
     dataset = getattr(datasets, dataset_name)

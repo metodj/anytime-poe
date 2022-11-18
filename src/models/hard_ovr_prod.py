@@ -18,13 +18,16 @@ from src.models.resnet import ResNet
 KwArgs = Mapping[str, Any]
 
 
-def hardened_ovr_ll(y_1hot, logits, T):
+def hardened_ovr_ll(y_1hot, logits, T, positive_class_only):
     assert_rank(T, 0)
     assert_rank(y_1hot, 1)
     assert_equal_shape([y_1hot, logits])
 
     σ = nn.sigmoid(T * logits).clip(1e-6, 1 - 1e-6)
-    res = jnp.sum(y_1hot * jnp.log(σ) + (1 - y_1hot) * jnp.log(1 - σ), axis=0)
+    if positive_class_only:
+        res = jnp.sum(y_1hot * jnp.log(σ), axis=0)
+    else:
+        res = jnp.sum(y_1hot * jnp.log(σ) + (1 - y_1hot) * jnp.log(1 - σ), axis=0)
     return res
 
 
@@ -55,6 +58,7 @@ class Hard_OvR_Ens(nn.Module):
         β: int = 1,
         per_member_loss: Optional[float] = None,
         alpha: float = 0.,
+        positive_class_only: bool = False,
     ) -> Array:
         ens_logits = jnp.stack([net(x, train=train) for net in self.nets], axis=0)  # (Μ, Ο)
         probs = nn.softmax(self.weights, axis=0)  # (M,)
@@ -63,7 +67,7 @@ class Hard_OvR_Ens(nn.Module):
 
         def product_logprob(y):
             y_1hot = jax.nn.one_hot(y, n_classes)  # TODO: this would not work for pixelwise classification
-            lls = jax.vmap(hardened_ovr_ll, in_axes=(None, 0, None))(y_1hot, ens_logits, β)
+            lls = jax.vmap(hardened_ovr_ll, in_axes=(None, 0, None, None))(y_1hot, ens_logits, β, positive_class_only)
             res = jnp.sum(probs * lls, axis=0)
             return res
 
@@ -131,14 +135,16 @@ def make_Hard_OvR_Ens_loss(
     aggregation: str = 'mean',
     per_member_loss: Optional[float] = None,
     ensemble_ids: List[int] = (0, 1, 2, 3, 4,),
-    alpha: float = 0.
+    alpha: float = 0.,
+    positive_class_only: bool = False,
 ) -> Callable:
     """Creates a loss function for training a Hard One-vs-Rest Ens."""
     def batch_loss(params, state, rng):
         # define loss func for 1 example
         def loss_fn(params, x, y):
             (loss, err, prod_ll, members_ll), new_state = model.apply(
-                {"params": params, **state}, x, y, train=train, β=β, per_member_loss=per_member_loss, alpha=alpha,
+                {"params": params, **state}, x, y, train=train, β=β,
+                per_member_loss=per_member_loss, alpha=alpha, positive_class_only=positive_class_only,
                 mutable=list(state.keys()) if train else {},
                 rngs={'dropout': rng},
             )
