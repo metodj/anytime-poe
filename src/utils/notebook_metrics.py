@@ -15,6 +15,14 @@ def categorical_probs(logits):
     return probs
 
 
+def categorical_probs_avg_probs(logits):
+    assert_rank(logits, 2)
+    assert_shape([logits], (None, 10))
+    probs = nn.softmax(logits).mean(axis=0)
+    assert_shape([probs], (10,))
+    return probs
+
+
 def categorical_probs_prod(logits, M=5, C=10):
     assert_rank(logits, 2)
     assert_shape([logits], (M, C))
@@ -26,6 +34,12 @@ def categorical_probs_prod(logits, M=5, C=10):
 
 def categorical_entropy(logits):
     probs = categorical_probs(logits)
+    cat = distrax.Categorical(probs=probs)
+    return cat.entropy()
+
+
+def categorical_entropy_avg_probs(logits):
+    probs = categorical_probs_avg_probs(logits)
     cat = distrax.Categorical(probs=probs)
     return cat.entropy()
 
