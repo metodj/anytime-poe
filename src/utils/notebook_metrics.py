@@ -44,6 +44,53 @@ def categorical_entropy_avg_probs(logits):
     return cat.entropy()
 
 
+def average_entropy(logits):
+    """
+    1/M \sum_{m=1}^M H[p_m(y | x)]
+    """
+    probs = nn.softmax(logits)
+    entropies = jax.vmap(lambda x: distrax.Categorical(probs=x).entropy(), in_axes=(0,))(probs)
+    return entropies.mean()
+
+
+def mutual_information(logits):
+    """
+    H[1/M \sum_{m=1}^M p_m(y | x)] - 1/M \sum_{m=1}^M H[p_m(y | x)]
+    """
+    return categorical_entropy_avg_probs(logits) - average_entropy(logits)
+
+
+def energy_num_stable(logits):
+    assert_rank(logits, 1)
+    c = jnp.max(logits)
+    return - (c + jnp.log(jnp.exp(logits - c).sum()))
+
+
+def average_energy(logits, C=10):
+    """
+    1/M \sum_{m=1}^M - log(\sum_k exp v_k), where v_k are the logits
+    """
+    assert_rank(logits, 2)
+    assert_shape([logits], (None, C))
+    return jax.vmap(energy_num_stable, in_axes=(0,))(logits).mean()
+
+
+def categorical_entropy_prod_probs(logits):
+    probs = ovr_prod_probs(logits)
+    cat = distrax.Categorical(probs=probs)
+    return cat.entropy()
+
+
+def msp_avg_probs(logits):
+    probs = categorical_probs_avg_probs(logits)
+    return 1. - jnp.max(probs)
+
+
+def msp_prod_probs(logits):
+    probs = ovr_prod_probs(logits)
+    return 1. - jnp.max(probs)
+
+
 def categorical_nll(logits, y):
     probs = categorical_probs(logits).clip(min=1e-36)
     cat = distrax.Categorical(probs=probs)
@@ -144,3 +191,7 @@ def pairwise_abs_diff(logits):
             if i != j:
                 total_diff += jnp.abs(softmax[i, :] - softmax[j, :]).sum()
     return total_diff / comb(M, 2)
+
+
+
+
