@@ -32,6 +32,7 @@ def get_config() -> config_dict.ConfigDict:
     config.model = config_dict.ConfigDict()
     config.model.size = 5
     config.model.learn_weights = False
+    config.model.net_type = "ResNetMLP"
 
     config.model.net = config_dict.ConfigDict()
     config.model.net.depth = 5

@@ -9,6 +9,7 @@ import distrax
 
 from src.models.common import get_agg_fn
 from src.models.resnet import ResNet
+from src.models.convnet import ConvNet
 
 
 KwArgs = Mapping[str, Any]
@@ -21,9 +22,15 @@ class Cls_Ens(nn.Module):
     weights_init: Callable = initializers.ones
     logscale_init: Callable = initializers.zeros
     learn_weights: bool = False
+    net_type: str = "ResNetMLP"
 
     def setup(self):
-        self.nets = [ResNet(**self.net) for _ in range(self.size)]
+        if self.net_type == "ResNetMLP":
+            self.nets = [ResNet(**self.net) for _ in range(self.size)]
+        elif self.net_type == "ConvNet":
+            self.nets = [ConvNet() for _ in range(self.size)]
+        else:
+            raise ValueError()
         weights = self.param(
             'weights',
             self.weights_init,

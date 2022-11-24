@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 
 from src.models.common import get_agg_fn, MembersLL
 from src.models.resnet import ResNet
+from src.models.convnet import ConvNet
 
 
 KwArgs = Mapping[str, Any]
@@ -39,9 +40,15 @@ class Hard_OvR_Ens(nn.Module):
     logscale_init: Callable = initializers.zeros
     learn_weights: bool = False
     members_ll_type: str = "softmax"
+    net_type: str = "ResNetMLP"
 
     def setup(self):
-        self.nets = [ResNet(**self.net) for _ in range(self.size)]
+        if self.net_type == "ResNetMLP":
+            self.nets = [ResNet(**self.net) for _ in range(self.size)]
+        elif self.net_type == "ConvNet":
+            self.nets = [ConvNet() for _ in range(self.size)]
+        else:
+            raise ValueError()
         weights = self.param(
             'weights',
             self.weights_init,
