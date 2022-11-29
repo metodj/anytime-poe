@@ -143,6 +143,15 @@ def ovr_prod_probs(logits):
     return probs
 
 
+def softmax_prod_probs(logits):
+    assert_rank(logits, 2)
+    assert_shape([logits], (None, 10))
+    σ = nn.softmax(logits).prod(axis=0)
+    assert_shape([σ], (10,))
+    probs = σ/(σ.sum() + 1e-36)
+    return probs
+
+
 def ovr_entropy(logits):
     probs = ovr_prod_probs(logits)
     return -jnp.sum(multiply_no_nan(jnp.log(probs), probs), axis=-1)

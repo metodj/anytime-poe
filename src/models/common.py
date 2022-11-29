@@ -1,11 +1,11 @@
-from typing import Callable, List, Tuple, Optional
+from typing import Callable, List
 from enum import Enum
 
-import distrax
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
-from chex import Array
+from chex import Array, assert_rank, assert_equal_shape
+import distrax
 
 from itertools import chain, combinations
 
@@ -70,4 +70,34 @@ def get_agg_fn(agg: str) -> Callable:
 def powerset(ens_size: int) -> List[List[int]]:
     ens_ids = [i for i in range(ens_size)]
     return list(map(list, list(chain.from_iterable(combinations(ens_ids, r) for r in range(1, len(ens_ids)+1)))))
+
+
+def hardened_ovr_ll(y_1hot: Array, logits: Array, T: float, positive_class_only: bool = False):
+    assert_rank(T, 0)
+    assert_rank(y_1hot, 1)
+    assert_equal_shape([y_1hot, logits])
+
+    σ = nn.sigmoid(T * logits).clip(1e-6, 1 - 1e-6)
+    if positive_class_only:
+        res = jnp.sum(y_1hot * jnp.log(σ), axis=0)
+    else:
+        res = jnp.sum(y_1hot * jnp.log(σ) + (1 - y_1hot) * jnp.log(1 - σ), axis=0)
+    return res
+
+
+def softmax_ll(y: int, logits: Array):
+    return distrax.Categorical(logits).log_prob(y)
+
+
+def product_logprob_ovr(y: int, ens_logits: Array, β: float, probs: Array, N: int, positive_class_only: bool = False):
+    y_1hot = jax.nn.one_hot(y, N)  # TODO: this would not work for pixelwise classification
+    lls = jax.vmap(hardened_ovr_ll, in_axes=(None, 0, None, None))(y_1hot, ens_logits, β, positive_class_only)
+    res = jnp.sum(probs * lls, axis=0)
+    return res
+
+
+def product_logprob_softmax(y: int, ens_logits: Array, probs: Array):
+    lls = jax.vmap(softmax_ll, in_axes=(None, 0))(y, ens_logits)
+    res = jnp.sum(probs * lls, axis=0)
+    return res
 

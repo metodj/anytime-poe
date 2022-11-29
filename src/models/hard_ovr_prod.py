@@ -1,35 +1,21 @@
 from typing import Any, Callable, Mapping, Optional, List
 from functools import partial
-from attr import mutable
 
 import numpy as np
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
 from flax.linen import initializers
-from chex import Array, assert_rank, assert_equal_shape
-import distrax
+from chex import Array
+
 import matplotlib.pyplot as plt
 
-from src.models.common import get_agg_fn, MembersLL
+from src.models.common import get_agg_fn, product_logprob_ovr, product_logprob_softmax
 from src.models.resnet import ResNet
 from src.models.convnet import ConvNet
 
 
 KwArgs = Mapping[str, Any]
-
-
-def hardened_ovr_ll(y_1hot, logits, T, positive_class_only):
-    assert_rank(T, 0)
-    assert_rank(y_1hot, 1)
-    assert_equal_shape([y_1hot, logits])
-
-    σ = nn.sigmoid(T * logits).clip(1e-6, 1 - 1e-6)
-    if positive_class_only:
-        res = jnp.sum(y_1hot * jnp.log(σ), axis=0)
-    else:
-        res = jnp.sum(y_1hot * jnp.log(σ) + (1 - y_1hot) * jnp.log(1 - σ), axis=0)
-    return res
 
 
 class Hard_OvR_Ens(nn.Module):
@@ -39,7 +25,7 @@ class Hard_OvR_Ens(nn.Module):
     weights_init: Callable = initializers.ones
     logscale_init: Callable = initializers.zeros
     learn_weights: bool = False
-    members_ll_type: str = "softmax"
+    ll_type: str = "ovr"   # softmax or ovr
     net_type: str = "ResNetMLP"
 
     def setup(self):
@@ -55,15 +41,14 @@ class Hard_OvR_Ens(nn.Module):
             (self.size,)
         )
         self.weights = weights if self.learn_weights else jax.lax.stop_gradient(weights)
-        self.members_ll = MembersLL[self.members_ll_type]
 
     def __call__(
         self,
         x: Array,
         y: int,
         train: bool = False,
-        β: int = 1,
-        per_member_loss: Optional[float] = None,
+        β: float = 1.,
+        alpha_static: Optional[float] = None,
         alpha: float = 0.,
         positive_class_only: bool = False,
     ) -> Array:
@@ -72,35 +57,29 @@ class Hard_OvR_Ens(nn.Module):
 
         n_classes = self.net['out_size']
 
-        def product_logprob(y):
-            y_1hot = jax.nn.one_hot(y, n_classes)  # TODO: this would not work for pixelwise classification
-            lls = jax.vmap(hardened_ovr_ll, in_axes=(None, 0, None, None))(y_1hot, ens_logits, β, positive_class_only)
-            res = jnp.sum(probs * lls, axis=0)
-            return res
+        if self.ll_type == "ovr":
+            product_logprob = partial(product_logprob_ovr, ens_logits=ens_logits,
+                                      probs=probs, N=n_classes,  β=β, positive_class_only=positive_class_only)
+        elif self.ll_type == "softmax":
+            product_logprob = partial(product_logprob_softmax, ens_logits=ens_logits, probs=probs)
+        else:
+            raise ValueError()
 
         ys = jnp.arange(n_classes)
         Z = jnp.sum(jnp.exp(jax.vmap(product_logprob)(ys)), axis=0)
 
         prod_ll = product_logprob(y)
-        nll = -(prod_ll - jnp.log(Z + 1e-36))
 
         prod_preds = nn.sigmoid(β * ens_logits).prod(axis=0)
         pred = prod_preds.argmax(axis=0)
         err = y != pred
 
-        nlls = 0.
-        if self.members_ll == MembersLL.softmax:
-            def nll_fn(y, logits):
-                return -1. * distrax.Categorical(logits).log_prob(y)
+        if alpha_static is not None:  # static schedule
+            Z_multiplier = alpha_static
+        else:  # dynamic_schedule
+            Z_multiplier = alpha
 
-            nlls = jnp.sum(jax.vmap(nll_fn, in_axes=(None, 0))(y, ens_logits), axis=0)
-            loss = (1-per_member_loss)*nll + per_member_loss*nlls
-        elif self.members_ll == MembersLL.soft_ovr:
-            nlls = -1. * prod_ll
-            # loss = -1. * prod_ll + (1-per_member_loss) * jnp.log(Z + 1e-36)
-            loss = -1. * prod_ll + alpha * jnp.log(Z + 1e-36)
-        else:
-            raise ValueError
+        loss = -1. * prod_ll + Z_multiplier * jnp.log(Z + 1e-36)
 
         return loss, err, jnp.log(Z + 1e-36), prod_ll
 
@@ -137,10 +116,10 @@ def make_Hard_OvR_Ens_loss(
     model: Hard_OvR_Ens,
     x_batch: Array,
     y_batch: Array,
-    β: int,
+    β: float,
     train: bool = True,
     aggregation: str = 'mean',
-    per_member_loss: Optional[float] = None,
+    alpha_static: Optional[float] = None,
     ensemble_ids: List[int] = (0, 1, 2, 3, 4,),
     alpha: float = 0.,
     positive_class_only: bool = False,
@@ -151,7 +130,7 @@ def make_Hard_OvR_Ens_loss(
         def loss_fn(params, x, y):
             (loss, err, prod_ll, members_ll), new_state = model.apply(
                 {"params": params, **state}, x, y, train=train, β=β,
-                per_member_loss=per_member_loss, alpha=alpha, positive_class_only=positive_class_only,
+                alpha_static=alpha_static, alpha=alpha, positive_class_only=positive_class_only,
                 mutable=list(state.keys()) if train else {},
                 rngs={'dropout': rng},
             )

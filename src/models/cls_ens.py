@@ -1,13 +1,13 @@
 from typing import Any, Callable, Mapping, List
+from functools import partial
 
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
 from flax.linen import initializers
 from chex import Array
-import distrax
 
-from src.models.common import get_agg_fn
+from src.models.common import get_agg_fn, product_logprob_ovr, product_logprob_softmax
 from src.models.resnet import ResNet
 from src.models.convnet import ConvNet
 
@@ -22,6 +22,7 @@ class Cls_Ens(nn.Module):
     weights_init: Callable = initializers.ones
     logscale_init: Callable = initializers.zeros
     learn_weights: bool = False
+    ll_type: str = "softmax"   # softmax or ovr
     net_type: str = "ResNetMLP"
 
     def setup(self):
@@ -43,20 +44,28 @@ class Cls_Ens(nn.Module):
         x: Array,
         y: int,
         train: bool = False,
+        β: float = 1.
     ) -> Array:
         ens_logits = jnp.stack([net(x, train=train) for net in self.nets], axis=0)  # (M, O)
         probs = nn.softmax(self.weights, axis=0)  # (M,)
 
-        def nll(y, logits):
-            return -1. * distrax.Categorical(logits).log_prob(y)
+        n_classes = self.net['out_size']
 
-        nlls = jax.vmap(nll, in_axes=(None, 0))(y, ens_logits)
-        loss = (nlls * probs).sum(axis=0)
+        if self.ll_type == "ovr":
+            product_logprob = partial(product_logprob_ovr, ens_logits=ens_logits,
+                                      probs=probs, N=n_classes,  β=β)
+        elif self.ll_type == "softmax":
+            product_logprob = partial(product_logprob_softmax, ens_logits=ens_logits, probs=probs)
+        else:
+            raise ValueError()
+
+        prod_ll = product_logprob(y)
+        loss = -1. * prod_ll
 
         pred = nn.softmax(ens_logits.mean(axis=0))
         err = y != jnp.argmax(pred, axis=0)
 
-        return loss, err, 1., jnp.sum(nlls, axis=0)
+        return loss, err, 1., prod_ll
 
     def pred(
         self,
@@ -92,13 +101,14 @@ def make_Cls_Ens_loss(
     aggregation: str = 'mean',
     ensemble_ids: List[int] = (0, 1, 2, 3, 4,),
     alpha: float = 0.,
+    β: float = 1.,
 ) -> Callable:
     """Creates a loss function for training a std Ens."""
     def batch_loss(params, state, rng):
         # define loss func for 1 example
         def loss_fn(params, x, y):
             (loss, err, prod_ll, members_ll), new_state = model.apply(
-                {"params": params, **state}, x, y, train=train,
+                {"params": params, **state}, x, y, train=train, β=β,
                 mutable=list(state.keys()) if train else {},
                 rngs={'dropout': rng},
             )
