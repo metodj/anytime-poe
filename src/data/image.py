@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from torch.utils import data
 from torchvision import transforms, datasets
+from src.data.color_mnist import ColorMNIST
 
 
 DATASET_MEAN = {
@@ -13,6 +14,7 @@ DATASET_MEAN = {
     'SVHN': (0.4377, 0.4438, 0.4728),
     'CIFAR10': (0.4914, 0.4822, 0.4465),
     'CIFAR100': (0.5071, 0.4866, 0.4409),
+    'ColorMNIST': (0.0991, 0.0678 , 0.0620),
     'EMNIST': (0.1721, ),
 }
 
@@ -24,6 +26,7 @@ DATASET_STD = {
     'SVHN': (0.1980, 0.2010, 0.1970),
     'CIFAR10': (0.2470, 0.2435, 0.2616),
     'CIFAR100': (0.2673, 0.2564, 0.2762),
+    'ColorMNIST': (0.2672, 0.2032, 0.2080),
     'EMNIST': (0.3308, ),
 }
 
@@ -78,7 +81,7 @@ def get_image_dataset(
     Returns:
         `(train_dataset, test_dataset)` if `val_percent` is 0 otherwise `(train_dataset, test_dataset, val_dataset)`
     """
-    dataset_choices = ['MNIST', 'FashionMNIST', 'KMNIST', 'SVHN', 'CIFAR10', 'CIFAR100', 'EMNIST']
+    dataset_choices = ['MNIST', 'FashionMNIST', 'KMNIST', 'SVHN', 'CIFAR10', 'CIFAR100', 'EMNIST', 'ColorMNIST']
     if dataset_name not in dataset_choices:
         msg = f"Dataset should be one of {dataset_choices} but was {dataset_name} instead."
         raise RuntimeError(msg)
@@ -104,6 +107,9 @@ def get_image_dataset(
         test_kwargs = {"split": 'test'}
 
     elif dataset_name == 'CIFAR10':
+        train_kwargs = {"train": True}
+        test_kwargs = {"train": False}
+    elif dataset_name == 'ColorMNIST':
         train_kwargs = {"train": True}
         test_kwargs = {"train": False}
 
@@ -137,7 +143,10 @@ def get_image_dataset(
         ] + normalize_transforms + common_transforms
     )
 
-    dataset = getattr(datasets, dataset_name)
+    if dataset_name == 'ColorMNIST':
+        dataset = ColorMNIST
+    else:
+        dataset = getattr(datasets, dataset_name)
     train_dataset = dataset(
         **train_kwargs, transform=transform_train, download=True, root=data_dir,
     )
