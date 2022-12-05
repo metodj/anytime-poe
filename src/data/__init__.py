@@ -17,6 +17,7 @@ METADATA = {
         'SVHN': (32, 32, 3),
         'CIFAR10': (32, 32, 3),
         'CIFAR100': (32, 32, 3),
+        'ColorMNIST': (28, 28, 3),
     },
     'num_train': {
         'MNIST': 60_000,
@@ -25,6 +26,7 @@ METADATA = {
         'SVHN': 60_000,
         'CIFAR10': 60_000,
         'CIFAR100': 60_000,
+        'ColorMNIST': 50_000,
     },
     'num_test': {
         'MNIST': 10_000,
@@ -33,5 +35,6 @@ METADATA = {
         'SVHN': 10_000,
         'CIFAR10': 10_000,
         'CIFAR100': 10_000,
+        'ColorMNIST': 10_000,
     }
 }

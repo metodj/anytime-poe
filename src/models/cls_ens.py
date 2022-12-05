@@ -9,7 +9,7 @@ from chex import Array
 
 from src.models.common import get_agg_fn, product_logprob_ovr, product_logprob_softmax
 from src.models.resnet import ResNet
-from src.models.convnet import ConvNet
+from src.models.convnet import ConvNet, ConvNetRGB
 
 
 KwArgs = Mapping[str, Any]
@@ -30,6 +30,8 @@ class Cls_Ens(nn.Module):
             self.nets = [ResNet(**self.net) for _ in range(self.size)]
         elif self.net_type == "ConvNet":
             self.nets = [ConvNet() for _ in range(self.size)]
+        elif self.net_type == "ConvNetRGB":
+            self.nets = [ConvNetRGB() for _ in range(self.size)]
         else:
             raise ValueError()
         weights = self.param(

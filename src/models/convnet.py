@@ -20,3 +20,24 @@ class ConvNet(nn.Module):
         x = nn.Dense(features=10)(x)
         x = x.reshape(-1)
         return x
+
+
+class ConvNetRGB(nn.Module):
+    """
+    https://www.machinelearningnuggets.com/image-classification-with-jax-flax/
+    """
+    @nn.compact
+    def __call__(self, x, train: bool = False):
+        x = x[None, ...]
+        x = nn.Conv(features=32, kernel_size=(3, 3))(x)
+        x = nn.relu(x)
+        x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
+        x = nn.Conv(features=64, kernel_size=(3, 3))(x)
+        x = nn.relu(x)
+        x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
+        x = x.reshape((x.shape[0], -1))  
+        x = nn.Dense(features=128)(x)
+        x = nn.relu(x)
+        x = nn.Dense(features=10)(x)
+        x = x.reshape(-1)
+        return x

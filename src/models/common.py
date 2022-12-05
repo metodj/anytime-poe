@@ -101,3 +101,12 @@ def product_logprob_softmax(y: int, ens_logits: Array, probs: Array):
     res = jnp.sum(probs * lls, axis=0)
     return res
 
+
+def prune_labels(dataset):
+    """
+    Used in ColorMNIST dataset to remove labels that are not used during training (colors).
+    """
+    for i in range(len(dataset)):
+        dataset[i] = (dataset[i][0], dataset[i][1][0])
+    return dataset
+
