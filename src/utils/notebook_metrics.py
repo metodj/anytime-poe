@@ -25,7 +25,7 @@ def categorical_probs_avg_probs(logits):
 
 def categorical_probs_prod(logits, M=5, C=10):
     assert_rank(logits, 2)
-    assert_shape([logits], (M, C))
+    assert_shape([logits], (None, C))
     probs = nn.softmax(logits).prod(axis=0)
     probs = probs / (probs.sum() + 1e-36)
     assert_shape([probs], (C,))
