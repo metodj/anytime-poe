@@ -4,61 +4,69 @@ import numpy as np
 import torch
 from torch.utils import data
 from torchvision import transforms, datasets
+from src.data.collage_mnist import CollageMNIST
 from src.data.color_mnist import ColorMNIST
 
 
 DATASET_MEAN = {
-    'MNIST': (0.1307,),
-    'FashionMNIST': (0.2860,),
-    'KMNIST': (0.1918,),
-    'SVHN': (0.4377, 0.4438, 0.4728),
-    'CIFAR10': (0.4914, 0.4822, 0.4465),
-    'CIFAR100': (0.5071, 0.4866, 0.4409),
-    'ColorMNIST': (0.0991, 0.0678 , 0.0620),
-    'EMNIST': (0.1721, ),
+    "MNIST": (0.1307,),
+    "FashionMNIST": (0.2860,),
+    "KMNIST": (0.1918,),
+    "SVHN": (0.4377, 0.4438, 0.4728),
+    "CIFAR10": (0.4914, 0.4822, 0.4465),
+    "CIFAR100": (0.5071, 0.4866, 0.4409),
+    "ColorMNIST": (0.0991, 0.0678, 0.0620),
+    "EMNIST": (0.1721,),
+    "CollageMNIST": (0.3369,),
 }
 
 
 DATASET_STD = {
-    'MNIST': (0.3081,),
-    'FashionMNIST': (0.3530,),
-    'KMNIST': (0.3483,),
-    'SVHN': (0.1980, 0.2010, 0.1970),
-    'CIFAR10': (0.2470, 0.2435, 0.2616),
-    'CIFAR100': (0.2673, 0.2564, 0.2762),
-    'ColorMNIST': (0.2672, 0.2032, 0.2080),
-    'EMNIST': (0.3308, ),
+    "MNIST": (0.3081,),
+    "FashionMNIST": (0.3530,),
+    "KMNIST": (0.3483,),
+    "SVHN": (0.1980, 0.2010, 0.1970),
+    "CIFAR10": (0.2470, 0.2435, 0.2616),
+    "CIFAR100": (0.2673, 0.2564, 0.2762),
+    "ColorMNIST": (0.2672, 0.2032, 0.2080),
+    "EMNIST": (0.3308,),
+    "CollageMNIST": (0.3227,),
 }
 
 
 class Flatten:
     """Transform to flatten an image for use with MLPs."""
+
     def __call__(self, array: np.ndarray) -> np.ndarray:
         return np.ravel(array)
 
 
 class MoveChannelDim:
     """Transform to change from PyTorch image ordering to Jax/TF ordering."""
+
     def __call__(self, array: np.ndarray) -> np.ndarray:
         return np.moveaxis(array, 0, -1)
 
 
 class ToNumpy:
     """Transform to convert from a PyTorch Tensor to a Numpy ndarray."""
+
     def __call__(self, tensor: torch.Tensor) -> np.ndarray:
         return np.array(tensor, dtype=np.float32)
 
 
 def get_image_dataset(
     dataset_name: str,
-    data_dir: str = '../raw_data',
+    data_dir: str = "../raw_data",
     flatten_img: bool = False,
     val_percent: float = 0.1,
     random_seed: int = 42,
     train_augmentations: list[Callable] = [],
     test_augmentations: list[Callable] = [],
     normalize: bool = True,
-) -> Union[Tuple[data.Dataset, data.Dataset], Tuple[data.Dataset, data.Dataset, data.Dataset]]:
+) -> Union[
+    Tuple[data.Dataset, data.Dataset], Tuple[data.Dataset, data.Dataset, data.Dataset]
+]:
     """Provides PyTorch `Dataset`s for the specified image dataset_name.
 
     Args:
@@ -81,40 +89,50 @@ def get_image_dataset(
     Returns:
         `(train_dataset, test_dataset)` if `val_percent` is 0 otherwise `(train_dataset, test_dataset, val_dataset)`
     """
-    dataset_choices = ['MNIST', 'FashionMNIST', 'KMNIST', 'SVHN', 'CIFAR10', 'CIFAR100', 'EMNIST', 'ColorMNIST']
+    dataset_choices = [
+        "MNIST",
+        "FashionMNIST",
+        "KMNIST",
+        "SVHN",
+        "CIFAR10",
+        "CIFAR100",
+        "EMNIST",
+        "ColorMNIST",
+        "CollageMNIST",
+    ]
     if dataset_name not in dataset_choices:
         msg = f"Dataset should be one of {dataset_choices} but was {dataset_name} instead."
         raise RuntimeError(msg)
 
-    if dataset_name == 'MNIST':
+    if dataset_name == "MNIST":
         train_kwargs = {"train": True}
         test_kwargs = {"train": False}
 
-    elif dataset_name == 'FashionMNIST':
+    elif dataset_name == "FashionMNIST":
         train_kwargs = {"train": True}
         test_kwargs = {"train": False}
 
-    elif dataset_name == 'KMNIST':
+    elif dataset_name == "KMNIST":
         train_kwargs = {"train": True}
         test_kwargs = {"train": False}
 
-    elif dataset_name == 'EMNIST':
-        train_kwargs = {"split": 'letters', "train": True}
-        test_kwargs = {"split": 'letters', "train": False}
+    elif dataset_name == "EMNIST":
+        train_kwargs = {"split": "letters", "train": True}
+        test_kwargs = {"split": "letters", "train": False}
 
-    elif dataset_name == 'SVHN':
-        train_kwargs = {"split": 'train'}
-        test_kwargs = {"split": 'test'}
+    elif dataset_name == "SVHN":
+        train_kwargs = {"split": "train"}
+        test_kwargs = {"split": "test"}
 
-    elif dataset_name == 'CIFAR10':
+    elif dataset_name == "CIFAR10":
         train_kwargs = {"train": True}
         test_kwargs = {"train": False}
-    elif dataset_name == 'ColorMNIST':
+    elif dataset_name == "ColorMNIST" or dataset_name == "CollageMNIST":
         train_kwargs = {"train": True}
         test_kwargs = {"train": False}
 
     else:
-        assert dataset_name == 'CIFAR100'
+        assert dataset_name == "CIFAR100"
 
         train_kwargs = {"train": True}
         test_kwargs = {"train": False}
@@ -127,39 +145,56 @@ def get_image_dataset(
         common_transforms += [Flatten()]
 
     if normalize:
-        normalize_transforms = [transforms.Normalize(DATASET_MEAN[dataset_name], DATASET_STD[dataset_name])]
+        normalize_transforms = [
+            transforms.Normalize(DATASET_MEAN[dataset_name], DATASET_STD[dataset_name])
+        ]
     else:
         normalize_transforms = []
 
     transform_train = transforms.Compose(
-        train_augmentations + [
-            transforms.ToTensor()
-        ] + normalize_transforms + common_transforms
+        train_augmentations
+        + [transforms.ToTensor()]
+        + normalize_transforms
+        + common_transforms
     )
 
     transform_test = transforms.Compose(
-        test_augmentations + [
+        test_augmentations
+        + [
             transforms.ToTensor(),
-        ] + normalize_transforms + common_transforms
+        ]
+        + normalize_transforms
+        + common_transforms
     )
 
-    if dataset_name == 'ColorMNIST':
+    if dataset_name == "ColorMNIST":
         dataset = ColorMNIST
+    elif dataset_name == "CollageMNIST":
+        dataset = CollageMNIST
     else:
         dataset = getattr(datasets, dataset_name)
     train_dataset = dataset(
-        **train_kwargs, transform=transform_train, download=True, root=data_dir,
+        **train_kwargs,
+        transform=transform_train,
+        download=True,
+        root=data_dir,
     )
     test_dataset = dataset(
-        **test_kwargs, transform=transform_test, download=True, root=data_dir,
+        **test_kwargs,
+        transform=transform_test,
+        download=True,
+        root=data_dir,
     )
 
-    if val_percent != 0.:
+    if val_percent != 0.0:
         num_train, num_val = train_val_split_sizes(len(train_dataset), val_percent)
 
         train_dataset, val_dataset = data.random_split(
-            train_dataset, [num_train, num_val],
-            torch.Generator().manual_seed(random_seed) if random_seed is not None else None
+            train_dataset,
+            [num_train, num_val],
+            torch.Generator().manual_seed(random_seed)
+            if random_seed is not None
+            else None,
         )
 
         return train_dataset, test_dataset, val_dataset

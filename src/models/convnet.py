@@ -9,7 +9,7 @@ class ConvNet(nn.Module):
 
     @nn.compact
     def __call__(self, x, n_conv_layers: int = 2, train: bool = False):
-        x = x.reshape(1, 28, 28, 1)
+        x = x.reshape(1, 16, 16, 1)
         for i in range(n_conv_layers):
             x = nn.Conv(features=16 * (i + 1), kernel_size=(3, 3))(x)
             x = nn.relu(x)

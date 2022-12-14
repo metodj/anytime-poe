@@ -2,12 +2,13 @@ from torch.utils.data import Dataset
 import os
 import pandas as pd
 import numpy as np
+from PIL import Image
 
 
 class CollageMNIST(Dataset):
     def __init__(
         self,
-        img_dir="/home/metod/datasets/mnist_collage/",
+        img_dir="/home/metod/datasets/collage_mnist/",
         transform=None,
         target_transform=None,
         train=True,
@@ -19,7 +20,7 @@ class CollageMNIST(Dataset):
         """
         self.train = train
         if self.train:
-            img_dir = os.path.join(img_dir, "train-all")
+            img_dir = os.path.join(img_dir, "train")
         else:
             img_dir = os.path.join(img_dir, "test")
         self.img_labels = pd.read_csv(os.path.join(img_dir, "labels.csv"))
@@ -32,15 +33,15 @@ class CollageMNIST(Dataset):
 
     def __getitem__(self, idx):
         img_path = os.path.join(self.img_dir, self.img_labels.iloc[idx, 0])
-        image = np.load(img_path)
-        digit_label = self.img_labels.iloc[idx, 1]
-        color_label = self.img_labels.iloc[idx, 2]
-        color_label_random = self.img_labels.iloc[idx, 3]
+        image = Image.open(img_path).convert('L')  # images are converted to grayscale
+        image = np.array(image) / 255.
+        label = self.img_labels.iloc[idx, 1]
+        label_type = self.img_labels.iloc[idx, 2]
         if self.transform:
             image = self.transform(image)
         if self.target_transform:
             label = self.target_transform(label)
         if self.train:
-            return image, digit_label
+            return image, label
         else:
-            return image, (digit_label, color_label, color_label_random)
+            return image, (label, label_type)
