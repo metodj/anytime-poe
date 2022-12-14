@@ -75,8 +75,14 @@ def average_energy(logits, C=10):
     return jax.vmap(energy_num_stable, in_axes=(0,))(logits).mean()
 
 
-def categorical_entropy_prod_probs(logits):
+def categorical_entropy_prod_probs_ovr(logits):
     probs = ovr_prod_probs(logits)
+    cat = distrax.Categorical(probs=probs)
+    return cat.entropy()
+
+
+def categorical_entropy_prod_probs_softmax(logits):
+    probs = categorical_probs_prod(logits)
     cat = distrax.Categorical(probs=probs)
     return cat.entropy()
 
@@ -97,6 +103,12 @@ def categorical_nll(logits, y):
     return -cat.log_prob(y)
 
 
+def categorical_nll_prod_probs_softmax(logits, y):
+    probs = categorical_probs_prod(logits).clip(min=1e-36)
+    cat = distrax.Categorical(probs=probs)
+    return -cat.log_prob(y)
+
+
 def mse(x, y):
     assert_equal_shape([x, y])
     assert_shape(x, (10,))
@@ -105,6 +117,11 @@ def mse(x, y):
 
 def categorical_brier(logits, y):
     probs = categorical_probs(logits)
+    return mse(probs, jax.nn.one_hot(y, 10))
+
+
+def categorical_brier_prod_probs_softmax(logits, y):
+    probs = categorical_probs_prod(logits)
     return mse(probs, jax.nn.one_hot(y, 10))
 
 
