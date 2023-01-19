@@ -209,7 +209,7 @@ def metrics_df(config, models, X_test, y_test, ens_model, prod_model):
     return agg_df
 
 
-def metrics_df_by_name(models, X_test, y_test, ens_model, prod_model):
+def metrics_df_by_name(models, X_test, y_test, ens_model, prod_model, model_folder='dynNN_redux'):
 
     results_df = pd.DataFrame(columns=['model_name', 'n_members', 
                                        'random_seed', 'H', 'err', 
@@ -220,7 +220,7 @@ def metrics_df_by_name(models, X_test, y_test, ens_model, prod_model):
     for model_name in models:
         print(model_name)
         model = prod_model if 'prod' in model_name else ens_model
-        state = restore_checkpoint(f'dynNN_redux/{model_name}', 1)
+        state = restore_checkpoint(f'{model_folder}/{model_name}', 1)
 
         results = compute_metrics(model, model_name, state, RANDOM_SEED, X_test, y_test)
         results_df = pd.concat([
